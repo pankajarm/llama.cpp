@@ -7846,6 +7846,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
         case LLM_ARCH_PANGU_EMBED:
         case LLM_ARCH_AFMOE:
         case LLM_ARCH_QWEN3NEXT:
+        case LLM_ARCH_NANOCHAT:
             return LLAMA_ROPE_TYPE_NEOX;
 
         case LLM_ARCH_QWEN2VL:

@@ -2388,8 +2388,13 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
 
         // sanity checks
         if (special_eos_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_eos_id) == 0) {
+            // NanoChat (and some other models) use eos=pad; treat as EOG without warning.
             special_eog_ids.insert(special_eos_id);
-            LLAMA_LOG_WARN("%s: special_eos_id is not in special_eog_ids - the tokenizer config may be incorrect\n", __func__);
+            if (special_pad_id != special_eos_id) {
+                LLAMA_LOG_WARN("%s: special_eos_id is not in special_eog_ids - the tokenizer config may be incorrect\n", __func__);
+            } else {
+                LLAMA_LOG_DEBUG("%s: eos_id equals pad_id; adding eos to EOG set without warning\n", __func__);
+            }
         }
 
         if (special_eot_id != LLAMA_TOKEN_NULL && special_eog_ids.count(special_eot_id) == 0) {
