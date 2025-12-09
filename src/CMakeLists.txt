@@ -93,6 +93,7 @@ add_library(llama
             models/mpt.cpp
             models/nemotron-h.cpp
             models/nemotron.cpp
+            models/nanochat.cpp
             models/neo-bert.cpp
             models/olmo.cpp
             models/olmo2.cpp
