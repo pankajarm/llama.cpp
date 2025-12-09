@@ -91,6 +91,7 @@ add_library(llama
             models/minicpm3.cpp
             models/minimax-m2.cpp
             models/mpt.cpp
+            models/nanochat.cpp
             models/nemotron-h.cpp
             models/nemotron.cpp
             models/neo-bert.cpp
