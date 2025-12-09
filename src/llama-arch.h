@@ -116,6 +116,7 @@ enum llm_arch {
     LLM_ARCH_RND1,
     LLM_ARCH_PANGU_EMBED,
     LLM_ARCH_MISTRAL3,
+    LLM_ARCH_NANOCHAT,
     LLM_ARCH_UNKNOWN,
 };
 
