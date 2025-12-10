@@ -10519,6 +10519,140 @@ def get_model_architecture(hparams: dict[str, Any], model_type: ModelType) -> st
     return arch
 
 
+@ModelBase.register("NanoChatForCausalLM")
+class NanoChatModel(TextModel):
+    """NanoChat model - parameter-free RMSNorm, 2-layer MLP with relu2, inverted RoPE"""
+    model_arch = gguf.MODEL_ARCH.NANOCHAT
+
+    def set_vocab(self):
+        # NanoChat uses a custom GPT-2 style BPE tokenizer
+        # Load from tokenizer.json directly
+        tokenizer_path = self.dir_model / "tokenizer.json"
+        
+        if not tokenizer_path.exists():
+            raise FileNotFoundError(f"tokenizer.json not found in {self.dir_model}")
+        
+        import json
+        with open(tokenizer_path, "r", encoding="utf-8") as f:
+            tokenizer_data = json.load(f)
+        
+        # Extract vocabulary
+        vocab = tokenizer_data.get("model", {}).get("vocab", {})
+        if not vocab:
+            raise ValueError("No vocab found in tokenizer.json")
+        
+        # Use config vocab_size if larger than tokenizer vocab (for special tokens)
+        config_vocab_size = self.hparams.get("vocab_size", len(vocab))
+        n_vocab = max(len(vocab), config_vocab_size)
+        
+        # Sort tokens by index
+        tokens = [""] * n_vocab
+        scores = [0.0] * n_vocab
+        toktypes = [gguf.TokenType.NORMAL] * n_vocab
+        
+        for token, idx in vocab.items():
+            if idx < n_vocab:
+                tokens[idx] = token
+                scores[idx] = -float(idx)  # Descending scores like GPT-2
+        
+        # Fill any missing tokens (special tokens not in tokenizer.json)
+        # These are typically the special tokens defined in config
+        special_token_mapping = {
+            65527: "<|bos|>",
+            65528: "<|user_start|>",
+            65529: "<|user_end|>",
+            65530: "<|assistant_start|>",
+            65531: "<|assistant_end|>",
+            65532: "<|python_start|>",
+            65533: "<|python_end|>",
+            65534: "<|output_start|>",
+            65535: "<|output_end|>",
+        }
+        
+        for idx in range(n_vocab):
+            if not tokens[idx]:  # Empty token
+                if idx in special_token_mapping:
+                    tokens[idx] = special_token_mapping[idx]
+                    toktypes[idx] = gguf.TokenType.CONTROL
+                else:
+                    tokens[idx] = f"<|reserved_{idx}|>"
+                    toktypes[idx] = gguf.TokenType.UNKNOWN
+        
+        # Extract merges and convert from list format to string format
+        raw_merges = tokenizer_data.get("model", {}).get("merges", [])
+        merges = []
+        for merge in raw_merges:
+            if isinstance(merge, list) and len(merge) == 2:
+                # Convert ["a", "b"] to "a b"
+                merges.append(f"{merge[0]} {merge[1]}")
+            elif isinstance(merge, str):
+                merges.append(merge)
+            else:
+                logger.warning(f"Unexpected merge format: {merge}")
+        
+        # Add vocab to GGUF
+        self.gguf_writer.add_tokenizer_model("gpt2")
+        self.gguf_writer.add_tokenizer_pre("default")
+        self.gguf_writer.add_token_list(tokens)
+        self.gguf_writer.add_token_scores(scores)
+        self.gguf_writer.add_token_types(toktypes)
+        
+        if merges:
+            self.gguf_writer.add_token_merges(merges)
+        
+        # Handle special tokens from tokenizer_config.json if available
+        special_vocab = gguf.SpecialVocab(self.dir_model, load_merges=False)
+        special_vocab.add_to_gguf(self.gguf_writer)
+
+    def set_gguf_parameters(self):
+        hparams = self.hparams
+        block_count = self.find_hparam(["n_layers", "num_hidden_layers"])
+
+        self.gguf_writer.add_context_length(hparams.get("max_position_embeddings", 2048))
+        self.gguf_writer.add_embedding_length(hparams["hidden_size"])
+        self.gguf_writer.add_block_count(block_count)
+        self.gguf_writer.add_feed_forward_length(hparams["intermediate_size"])
+        self.gguf_writer.add_head_count(hparams["num_attention_heads"])
+        self.gguf_writer.add_head_count_kv(hparams.get("num_key_value_heads", hparams["num_attention_heads"]))
+
+        # RoPE settings
+        rope_theta = 10000.0
+        if "rope_parameters" in hparams:
+            rope_theta = hparams["rope_parameters"].get("rope_theta", 10000.0)
+        elif "rope_theta" in hparams:
+            rope_theta = hparams["rope_theta"]
+        self.gguf_writer.add_rope_freq_base(rope_theta)
+
+        # RMSNorm epsilon (parameter-free norm)
+        self.gguf_writer.add_layer_norm_rms_eps(hparams.get("rms_norm_eps", 1e-6))
+
+        # Vocab size
+        self.gguf_writer.add_vocab_size(hparams["vocab_size"])
+
+        # Final logit softcapping
+        if "final_logit_softcapping" in hparams:
+            self.gguf_writer.add_final_logit_softcapping(hparams["final_logit_softcapping"])
+
+        # RoPE dimension count (full rotation)
+        head_dim = hparams["hidden_size"] // hparams["num_attention_heads"]
+        self.gguf_writer.add_rope_dimension_count(head_dim)
+
+        self.gguf_writer.add_file_type(self.ftype)
+
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        # NanoChat has straightforward tensor names, no permutation needed
+        # Map HuggingFace tensor names to GGUF names
+        
+        # Skip norm weights (parameter-free RMSNorm)
+        if "input_layernorm" in name or "post_attention_layernorm" in name or "norm" in name:
+            if "weight" in name and "model.layers" in name:
+                # Skip layer norm weights - NanoChat uses parameter-free RMSNorm
+                return []
+
+        # Map tensor names
+        return [(self.map_tensor_name(name), data_torch)]
+
+
 def main() -> None:
     args = parse_args()
 

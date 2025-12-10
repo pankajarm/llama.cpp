@@ -135,6 +135,50 @@ struct common_sampler {
         }
 
         cur_p = { cur.data(), cur.size(), -1, false };
+
+        // DEBUG: Print logits analysis if LLAMA_DEBUG_LOGITS is set
+        static bool debug_logits = (getenv("LLAMA_DEBUG_LOGITS") != nullptr);
+        if (debug_logits) {
+            // First, check how many NaN values exist
+            int nan_count = 0;
+            int inf_count = 0;
+            int finite_count = 0;
+            float first_finite = 0.0f;
+            int first_finite_idx = -1;
+            
+            for (llama_token token_id = 0; token_id < n_vocab; token_id++) {
+                if (std::isnan(logits[token_id])) {
+                    nan_count++;
+                } else if (std::isinf(logits[token_id])) {
+                    inf_count++;
+                } else {
+                    finite_count++;
+                    if (first_finite_idx < 0) {
+                        first_finite = logits[token_id];
+                        first_finite_idx = token_id;
+                    }
+                }
+            }
+            
+            fprintf(stderr, "[DEBUG LOGITS idx=%d] NaN=%d, Inf=%d, Finite=%d/%d\n",
+                    idx, nan_count, inf_count, finite_count, n_vocab);
+            
+            if (first_finite_idx >= 0) {
+                fprintf(stderr, "  First finite value: token %d = %.6f\n", first_finite_idx, first_finite);
+            }
+            
+            // Print first 10 raw logit values to see the pattern
+            fprintf(stderr, "  First 10 raw logits: ");
+            for (int i = 0; i < 10 && i < n_vocab; i++) {
+                fprintf(stderr, "%.4f ", logits[i]);
+            }
+            fprintf(stderr, "\n");
+            
+            // Print specific tokens of interest
+            fprintf(stderr, "  Token 10 (newline): logit=%.6f\n", logits[10]);
+            fprintf(stderr, "  Token 44 (comma): logit=%.6f\n", logits[44]);
+            fprintf(stderr, "  Token 28173 (Hello): logit=%.6f\n", logits[28173]);
+        }
     }
 
     common_time_meas tm() {

@@ -11,6 +11,9 @@
 //   NanoChat uses: y1 = x1*cos + x2*sin, y2 = -x1*sin + x2*cos
 //   This is equivalent to standard RoPE with negated positions
 
+#include <cstdlib>
+#include <cstdio>
+
 llm_build_nanochat::llm_build_nanochat(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
     const int64_t n_embd_head = hparams.n_embd_head_v;
 
@@ -22,6 +25,17 @@ llm_build_nanochat::llm_build_nanochat(const llama_model & model, const llm_grap
 
     // Token embeddings
     inpL = build_inp_embd(model.tok_embd);
+
+    // DEBUG: Check embedding tensor shape
+    static bool debug_shapes = (getenv("LLAMA_DEBUG_SHAPES") != nullptr);
+    if (debug_shapes) {
+        fprintf(stderr, "[NANOCHAT DEBUG] tok_embd shape: ne[0]=%lld ne[1]=%lld ne[2]=%lld ne[3]=%lld\n",
+                (long long)model.tok_embd->ne[0], (long long)model.tok_embd->ne[1], 
+                (long long)model.tok_embd->ne[2], (long long)model.tok_embd->ne[3]);
+        fprintf(stderr, "[NANOCHAT DEBUG] inpL after embd: ne[0]=%lld ne[1]=%lld type=%d\n",
+                (long long)inpL->ne[0], (long long)inpL->ne[1], (int)inpL->type);
+        fprintf(stderr, "[NANOCHAT DEBUG] f_norm_rms_eps=%e\n", hparams.f_norm_rms_eps);
+    }
 
     // NanoChat: RMSNorm immediately after token embeddings (parameter-free)
     inpL = ggml_rms_norm(ctx0, inpL, hparams.f_norm_rms_eps);
@@ -71,6 +85,14 @@ llm_build_nanochat::llm_build_nanochat(const llama_model & model, const llm_grap
             // - Negative freq_scale negates the angle, inverting the rotation
             const float nanochat_freq_scale = -freq_scale;  // Negate to invert rotation
             const int nanochat_rope_type = GGML_ROPE_TYPE_NEOX;  // Use NEOX-style dim splitting
+            
+            // Debug: print freq_scale values once
+            static bool printed_freq_scale = false;
+            if (!printed_freq_scale) {
+                fprintf(stderr, "[NANOCHAT DEBUG] freq_scale=%f, nanochat_freq_scale=%f, freq_base=%f\n",
+                        freq_scale, nanochat_freq_scale, freq_base);
+                printed_freq_scale = true;
+            }
             
             Qcur = ggml_rope_ext(
                     ctx0, Qcur, inp_pos, nullptr,
@@ -152,8 +174,15 @@ llm_build_nanochat::llm_build_nanochat(const llama_model & model, const llm_grap
         cur = ggml_scale(ctx0, cur, hparams.f_final_logit_softcapping);
     }
 
-    // Debug: logits summary (max/min/mean) controlled by env LLAMA_NANOCHAT_DEBUG
-    // Debug logging removed (older ggml lacks reduce helpers)
+    // Debug: print tensor info if LLAMA_NANOCHAT_DEBUG is set
+    // Note: This debug code doesn't print actual values since computation hasn't happened yet
+    static bool debug_enabled = (getenv("LLAMA_NANOCHAT_DEBUG") != nullptr);
+    if (debug_enabled) {
+        fprintf(stderr, "[NANOCHAT DEBUG] result_output tensor: ne[0]=%lld ne[1]=%lld type=%d\n", 
+                (long long)cur->ne[0], (long long)cur->ne[1], (int)cur->type);
+        fprintf(stderr, "[NANOCHAT DEBUG] n_layer=%d n_head=%d n_embd_head=%d n_rot=%d\n",
+                n_layer, n_head, (int)n_embd_head, n_rot);
+    }
 
     cb(cur, "result_output", -1);
     res->t_logits = cur;

@@ -1229,6 +1229,21 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
     const int64_t n_kv     = dst->ne[0];
     const int64_t n_stream = dst->ne[3]; // num streams in the current ubatch
 
+    // DEBUG: Print mask setup info
+    static bool debug_mask = (getenv("LLAMA_DEBUG_MASK") != nullptr);
+    if (debug_mask) {
+        fprintf(stderr, "[DEBUG MASK] n_tokens=%u, n_kv=%lld, n_stream=%lld, causal_attn=%d\n",
+                n_tokens, (long long)n_kv, (long long)n_stream, causal_attn);
+        // Check how many cells are non-empty
+        int non_empty_count = 0;
+        for (const auto& cells : v_cells) {
+            for (uint32_t j = 0; j < n_kv && j < cells.size(); ++j) {
+                if (!cells.is_empty(j)) non_empty_count++;
+            }
+        }
+        fprintf(stderr, "[DEBUG MASK] non-empty cells: %d\n", non_empty_count);
+    }
+
     GGML_ASSERT(n_tokens%n_stream == 0);
 
     // n_tps == n_tokens_per_stream
@@ -1301,6 +1316,19 @@ void llama_kv_cache::set_input_kq_mask(ggml_tensor * dst, const llama_ubatch * u
                     data[idst + j] = hparams.use_alibi ? -std::abs(p0 - p1) : 0.0f;
                 }
             }
+        }
+    }
+
+    // DEBUG: Print mask stats after setup
+    static bool debug_mask2 = (getenv("LLAMA_DEBUG_MASK") != nullptr);
+    if (debug_mask2) {
+        int non_inf_count = 0;
+        for (int64_t i = 0; i < ggml_nelements(dst); ++i) {
+            if (!std::isinf(data[i])) non_inf_count++;
+        }
+        fprintf(stderr, "[DEBUG MASK] non-inf mask values: %d / %lld\n", non_inf_count, (long long)ggml_nelements(dst));
+        if (non_inf_count == 0) {
+            fprintf(stderr, "[DEBUG MASK] WARNING: All mask values are -inf! This will cause NaN in softmax!\n");
         }
     }
 }
