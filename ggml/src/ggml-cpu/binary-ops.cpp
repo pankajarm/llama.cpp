@@ -1,4 +1,7 @@
 #include "binary-ops.h"
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #if defined(GGML_USE_ACCELERATE)
 #include <Accelerate/Accelerate.h>
@@ -141,8 +144,38 @@ static void binary_op(const ggml_compute_params * params, ggml_tensor * dst) {
     }
 }
 
+// DEBUG: NaN check for add operation
+static int g_add_nan_counter = 0;
+
+static void check_add_nan(const float * data, int64_t n, const char * desc, const char * tensor_name) {
+    static int nan_debug_enabled = -1;
+    if (nan_debug_enabled < 0) {
+        nan_debug_enabled = (getenv("LLAMA_NAN_DEBUG") != NULL) ? 1 : 0;
+    }
+    if (!nan_debug_enabled) return;
+    
+    int nan_count = 0;
+    int inf_count = 0;
+    for (int64_t i = 0; i < n && i < 100000; i++) {
+        if (std::isnan(data[i])) nan_count++;
+        else if (std::isinf(data[i])) inf_count++;
+    }
+    
+    if (nan_count > 0 || inf_count > 0) {
+        fprintf(stderr, "[NAN_DEBUG add #%d] %s %s: NaN=%d, Inf=%d / %lld\n",
+                g_add_nan_counter, desc, tensor_name ? tensor_name : "",
+                nan_count, inf_count, (long long)n);
+    }
+}
+
 void ggml_compute_forward_add_non_quantized(const ggml_compute_params * params, ggml_tensor * dst) {
     binary_op<op_add>(params, dst);
+    
+    // DEBUG: Check output for NaN
+    if (params->ith == 0 && dst->type == GGML_TYPE_F32) {
+        g_add_nan_counter++;
+        check_add_nan((float*)dst->data, ggml_nelements(dst), "OUTPUT", dst->name);
+    }
 }
 
 void ggml_compute_forward_sub(const ggml_compute_params * params, ggml_tensor * dst) {

@@ -3643,6 +3643,56 @@ void ggml_compute_forward_norm(
 
 // ggml_compute_forward_group_rms_norm
 
+// DEBUG: Global NaN tracking for NanoChat debugging
+static int g_nan_check_counter = 0;
+static bool g_nan_found = false;
+static const char * g_first_nan_op = nullptr;
+static int g_verbose_debug = -1;  // -1 = not initialized, 0 = off, 1 = on
+
+static bool check_nan_in_array(const float * data, int64_t n, const char * op_name, const char * tensor_name, bool check_input) {
+    static bool nan_debug = (getenv("LLAMA_NAN_DEBUG") != nullptr);
+    if (!nan_debug) return false;
+    
+    // Initialize verbose mode
+    if (g_verbose_debug < 0) {
+        g_verbose_debug = (getenv("LLAMA_NAN_VERBOSE") != nullptr) ? 1 : 0;
+    }
+    
+    int nan_count = 0;
+    int inf_count = 0;
+    for (int64_t i = 0; i < n; i++) {
+        if (isnan(data[i])) nan_count++;
+        else if (isinf(data[i])) inf_count++;
+    }
+    
+    // Print all operations if verbose, or just NaN ones
+    if (g_verbose_debug && !check_input) {
+        fprintf(stderr, "[NAN_DEBUG #%d] %s %s: n=%lld, NaN=%d, Inf=%d, first=%.4f\n",
+                g_nan_check_counter, op_name, tensor_name ? tensor_name : "",
+                (long long)n, nan_count, inf_count, n > 0 ? data[0] : 0.0f);
+    }
+    
+    if (nan_count > 0 || inf_count > 0) {
+        if (!g_nan_found || check_input) {
+            fprintf(stderr, "[NAN_DEBUG #%d] %s in %s %s: NaN=%d, Inf=%d / %lld\n",
+                    g_nan_check_counter, check_input ? "INPUT" : "OUTPUT",
+                    op_name, tensor_name ? tensor_name : "",
+                    nan_count, inf_count, (long long)n);
+            if (n > 0) {
+                fprintf(stderr, "  First 5: %.6f %.6f %.6f %.6f %.6f\n",
+                        data[0], n>1?data[1]:0, n>2?data[2]:0, n>3?data[3]:0, n>4?data[4]:0);
+            }
+            if (!g_nan_found && !check_input) {
+                g_nan_found = true;
+                g_first_nan_op = op_name;
+                fprintf(stderr, "[NAN_DEBUG] *** FIRST NaN detected in %s at tensor '%s' ***\n", op_name, tensor_name ? tensor_name : "unknown");
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 static void ggml_compute_forward_rms_norm_f32(
         const ggml_compute_params * params,
         ggml_tensor * dst) {
@@ -3662,6 +3712,12 @@ static void ggml_compute_forward_rms_norm_f32(
     memcpy(&eps, dst->op_params, sizeof(float));
 
     GGML_ASSERT(eps >= 0.0f);
+
+    // DEBUG: Check input for NaN
+    if (ith == 0) {
+        g_nan_check_counter++;
+        check_nan_in_array((float*)src0->data, ggml_nelements(src0), "rms_norm", dst->name, true);
+    }
 
     // TODO: optimize
     for (int64_t i03 = 0; i03 < ne03; i03++) {
@@ -3691,6 +3747,11 @@ static void ggml_compute_forward_rms_norm_f32(
                 ggml_vec_scale_f32(ne00, y, scale);
             }
         }
+    }
+
+    // DEBUG: Check output for NaN
+    if (ith == 0) {
+        check_nan_in_array((float*)dst->data, ggml_nelements(dst), "rms_norm", dst->name, false);
     }
 }
 
@@ -4669,6 +4730,12 @@ static void ggml_compute_forward_get_rows_f16(
             (const ggml_fp16_t*) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                        (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
     }
+
+    // DEBUG: Check output for NaN
+    if (ith == 0) {
+        g_nan_check_counter++;
+        check_nan_in_array((float*)dst->data, ggml_nelements(dst), "get_rows_f16", dst->name, false);
+    }
 }
 
 static void ggml_compute_forward_get_rows_bf16(
@@ -5177,6 +5244,12 @@ static void ggml_compute_forward_soft_max_f32(
 
     const int ith = params->ith;
     const int nth = params->nth;
+
+    // DEBUG: Check soft_max input for NaN
+    if (ith == 0) {
+        g_nan_check_counter++;
+        check_nan_in_array((float*)src0->data, ggml_nelements(src0), "soft_max", dst->name, true);
+    }
 
     GGML_TENSOR_UNARY_OP_LOCALS
 

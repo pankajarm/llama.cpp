@@ -1,4 +1,33 @@
 #include "unary-ops.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+
+// DEBUG: NaN check for unary operations
+static int g_unary_nan_counter = 0;
+
+static void check_unary_nan(const float * data, int64_t n, const char * op_name, const char * tensor_name) {
+    static int nan_debug_enabled = -1;
+    if (nan_debug_enabled < 0) {
+        nan_debug_enabled = (getenv("LLAMA_NAN_DEBUG") != NULL) ? 1 : 0;
+    }
+    if (!nan_debug_enabled) return;
+    
+    int nan_count = 0;
+    int inf_count = 0;
+    float max_val = 0.0f;
+    for (int64_t i = 0; i < n && i < 100000; i++) {
+        if (std::isnan(data[i])) nan_count++;
+        else if (std::isinf(data[i])) inf_count++;
+        else if (std::fabs(data[i]) > max_val) max_val = std::fabs(data[i]);
+    }
+    
+    if (nan_count > 0 || inf_count > 0) {
+        fprintf(stderr, "[NAN_DEBUG %s #%d] OUTPUT %s: NaN=%d, Inf=%d / %lld, max=%.4f\n",
+                op_name, g_unary_nan_counter, tensor_name ? tensor_name : "",
+                nan_count, inf_count, (long long)n, max_val);
+    }
+}
 
 static inline float op_abs(float x) {
     return fabsf(x);
@@ -260,6 +289,12 @@ void ggml_compute_forward_elu(const ggml_compute_params * params, ggml_tensor * 
 
 void ggml_compute_forward_relu(const ggml_compute_params * params, ggml_tensor * dst) {
     unary_op<op_relu>(params, dst);
+    
+    // DEBUG: Check output for NaN
+    if (params->ith == 0 && dst->type == GGML_TYPE_F32) {
+        g_unary_nan_counter++;
+        check_unary_nan((float*)dst->data, ggml_nelements(dst), "relu", dst->name);
+    }
 }
 
 void ggml_compute_forward_sigmoid(const ggml_compute_params * params, ggml_tensor * dst) {
@@ -280,6 +315,12 @@ void ggml_compute_forward_hardswish(const ggml_compute_params * params, ggml_ten
 
 void ggml_compute_forward_sqr(const ggml_compute_params * params, ggml_tensor * dst) {
     unary_op<op_sqr>(params, dst);
+    
+    // DEBUG: Check output for NaN
+    if (params->ith == 0 && dst->type == GGML_TYPE_F32) {
+        g_unary_nan_counter++;
+        check_unary_nan((float*)dst->data, ggml_nelements(dst), "sqr", dst->name);
+    }
 }
 
 void ggml_compute_forward_sqrt(const ggml_compute_params * params, ggml_tensor * dst) {

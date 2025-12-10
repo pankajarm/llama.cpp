@@ -28,6 +28,31 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdio.h>
+
+// DEBUG: NaN tracking for NanoChat debugging
+static int g_mul_mat_nan_counter = 0;
+
+static void check_mul_mat_nan(const float * data, int64_t n, const char * desc, const char * tensor_name) {
+    static int nan_debug_enabled = -1;
+    if (nan_debug_enabled < 0) {
+        nan_debug_enabled = (getenv("LLAMA_NAN_DEBUG") != NULL) ? 1 : 0;
+    }
+    if (!nan_debug_enabled) return;
+    
+    int nan_count = 0;
+    int inf_count = 0;
+    for (int64_t i = 0; i < n && i < 100000; i++) {
+        if (isnan(data[i])) nan_count++;
+        else if (isinf(data[i])) inf_count++;
+    }
+    
+    if (nan_count > 0 || inf_count > 0) {
+        fprintf(stderr, "[NAN_DEBUG mul_mat #%d] %s %s: NaN=%d, Inf=%d / %lld\n",
+                g_mul_mat_nan_counter, desc, tensor_name ? tensor_name : "",
+                nan_count, inf_count, (long long)n);
+    }
+}
 #include <inttypes.h>
 #include <stdio.h>
 #include <float.h>
@@ -1219,6 +1244,14 @@ void ggml_compute_forward_mul_mat(
 
     const int ith = params->ith;
     const int nth = params->nth;
+
+    // DEBUG: Check for NaN in inputs
+    if (ith == 0) {
+        g_mul_mat_nan_counter++;
+        if (src1->type == GGML_TYPE_F32) {
+            check_mul_mat_nan((float*)src1->data, ggml_nelements(src1), "INPUT src1", dst->name);
+        }
+    }
 
     enum ggml_type           const vec_dot_type         = type_traits_cpu[src0->type].vec_dot_type;
     ggml_from_float_t        const from_float           = type_traits_cpu[vec_dot_type].from_float;
