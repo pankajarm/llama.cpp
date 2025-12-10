@@ -5245,12 +5245,6 @@ static void ggml_compute_forward_soft_max_f32(
     const int ith = params->ith;
     const int nth = params->nth;
 
-    // DEBUG: Check soft_max input for NaN
-    if (ith == 0) {
-        g_nan_check_counter++;
-        check_nan_in_array((float*)src0->data, ggml_nelements(src0), "soft_max", dst->name, true);
-    }
-
     GGML_TENSOR_UNARY_OP_LOCALS
 
     const int64_t nb11 = src1 ? src1->nb[1] : 1;
@@ -5358,6 +5352,12 @@ void ggml_compute_forward_soft_max(
             {
                 GGML_ABORT("fatal error");
             }
+    }
+
+    // DEBUG: Check output for NaN
+    if (params->ith == 0) {
+        g_nan_check_counter++;
+        check_nan_in_array((float*)dst->data, ggml_nelements(dst), "soft_max", dst->name, false);
     }
 }
 

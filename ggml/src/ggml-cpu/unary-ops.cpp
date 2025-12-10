@@ -16,16 +16,22 @@ static void check_unary_nan(const float * data, int64_t n, const char * op_name,
     int nan_count = 0;
     int inf_count = 0;
     float max_val = 0.0f;
+    int large_count = 0;  // Count values > 65000 (close to F16 max)
     for (int64_t i = 0; i < n && i < 100000; i++) {
         if (std::isnan(data[i])) nan_count++;
         else if (std::isinf(data[i])) inf_count++;
-        else if (std::fabs(data[i]) > max_val) max_val = std::fabs(data[i]);
+        else {
+            float abs_val = std::fabs(data[i]);
+            if (abs_val > max_val) max_val = abs_val;
+            if (abs_val > 65000.0f) large_count++;
+        }
     }
     
-    if (nan_count > 0 || inf_count > 0) {
-        fprintf(stderr, "[NAN_DEBUG %s #%d] OUTPUT %s: NaN=%d, Inf=%d / %lld, max=%.4f\n",
+    // Print if NaN/Inf found OR if large values detected (potential overflow)
+    if (nan_count > 0 || inf_count > 0 || large_count > 0) {
+        fprintf(stderr, "[NAN_DEBUG %s #%d] OUTPUT %s: NaN=%d, Inf=%d, Large(>65k)=%d / %lld, max=%.2f\n",
                 op_name, g_unary_nan_counter, tensor_name ? tensor_name : "",
-                nan_count, inf_count, (long long)n, max_val);
+                nan_count, inf_count, large_count, (long long)n, max_val);
     }
 }
 
