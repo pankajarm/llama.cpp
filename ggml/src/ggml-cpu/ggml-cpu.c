@@ -1433,6 +1433,11 @@ UseGgmlGemm2:;
 
         current_chunk = atomic_fetch_add_explicit(&params->threadpool->current_chunk, 1, memory_order_relaxed);
     }
+
+    // DEBUG: Check output for NaN (only thread 0)
+    if (ith == 0 && dst->type == GGML_TYPE_F32) {
+        check_mul_mat_nan((float*)dst->data, ggml_nelements(dst), "OUTPUT", dst->name);
+    }
 }
 
 // ggml_compute_forward_mul_mat_id
