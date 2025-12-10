@@ -152,6 +152,9 @@ llm_build_nanochat::llm_build_nanochat(const llama_model & model, const llm_grap
         cur = ggml_scale(ctx0, cur, hparams.f_final_logit_softcapping);
     }
 
+    // Debug: logits summary (max/min/mean) controlled by env LLAMA_NANOCHAT_DEBUG
+    // Debug logging removed (older ggml lacks reduce helpers)
+
     cb(cur, "result_output", -1);
     res->t_logits = cur;
 
